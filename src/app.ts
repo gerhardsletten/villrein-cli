@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import {
-  TAnimalTracking,
+  type TAnimalTracking,
   collectForYear,
   groupDays,
   listyears,

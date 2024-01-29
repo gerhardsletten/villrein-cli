@@ -1,4 +1,4 @@
-import { FastifyInstance } from "fastify";
+import { type FastifyInstance } from "fastify";
 import { describe, expect, test, beforeAll, afterAll } from "@jest/globals";
 import { buildFastify } from "./app.ts";
 

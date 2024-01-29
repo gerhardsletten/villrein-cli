@@ -4,7 +4,7 @@ import { Command } from "@commander-js/extra-typings";
 import figlet from "figlet";
 import ora from "ora";
 import {
-  TAnimalTracking,
+  type TAnimalTracking,
   collectForYear,
   listyears,
   parseVillreinStats,

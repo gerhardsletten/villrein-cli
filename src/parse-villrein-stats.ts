@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import { length, lineString, center, points } from "@turf/turf";
-import { type Feature, type FeatureCollection } from "geojson";
 import { getWeek } from "date-fns";
 
 const DATA_DIR = "./data";
@@ -10,57 +9,59 @@ const OUT_DIR = "./out";
 // lng = X
 // lat = y
 
-export interface TTrackInput {
+type TTrackInput = {
   id: string | number;
   latitude: number;
   longitude: number;
   dateTime: string;
-}
+};
 
-export interface TAnimalTrackingInput {
-  id: string;
-  name: string;
-  ageString: string;
-  positions: TTrackInput[];
-  meta: TAnimalTrackingMeta;
-}
-
-export interface TTrack {
-  id: string | number;
-  point: [number, number];
-  date: string;
-}
-
-export interface TAnimalTrackingMeta {
-  positions: number;
-  distance: string;
-  min: string;
-  avg: string;
-  max: string;
-  days: number;
-}
-
-export interface TAnimalTracking {
+export type TAnimalTracking = {
   id: string;
   name: string;
   ageString: string;
   positions: TTrack[];
-  meta: TAnimalTrackingMeta;
-}
+};
 
-export interface TAnimalTrackingFile {
+export type TAnimalTrackingInput = Omit<TAnimalTracking, "positions"> & {
+  positions: TTrackInput[];
+};
+
+export type TTrack = {
+  point: [number, number];
+  date: string;
+  dist: number;
+};
+
+type TAnimalTrackingFile = {
   vm: TAnimalTrackingInput[];
-}
+};
 
-export interface TDayStats {
+type TDayStats = {
   day: Date;
   dayString: string;
   weekString: string;
   distance: number;
   positions: TTrack[];
-}
+};
 
 type TTimeGroup = "day" | "week";
+
+function mergePoints(list: TTrack[]): TTrack {
+  const centerPoint = center(points(list.map((pos) => pos.point)));
+  const centerPosition = list[Math.round((list.length - 1) / 2)];
+  const dist = list.reduce((sum, item) => {
+    return sum + item.dist;
+  }, 0);
+  return {
+    ...centerPosition,
+    point: [
+      centerPoint.geometry.coordinates[0],
+      centerPoint.geometry.coordinates[1],
+    ],
+    dist,
+  };
+}
 
 export function groupDays(
   items: TAnimalTracking[],
@@ -71,21 +72,39 @@ export function groupDays(
     return {
       ...item,
       positions: days.map((day, i) => {
-        const centerPoint = center(
-          points(day.positions.map((pos) => pos.point))
-        );
-        let centerPosition =
-          day.positions[Math.round((day.positions.length - 1) / 2)];
-        return {
-          ...centerPosition,
-          point: [
-            centerPoint.geometry.coordinates[0],
-            centerPoint.geometry.coordinates[1],
-          ],
-        };
+        return mergePoints(day.positions);
       }),
     };
   });
+}
+
+export function optimizePositions(
+  item: TAnimalTracking,
+  minDistance: number
+): TAnimalTracking {
+  let optimized: TTrack[] = [];
+  const days = findDateRange(item.positions, "day");
+  days.forEach((day) => {
+    let inGroup: TTrack[] = [];
+    day.positions.forEach((position, i) => {
+      if (position.dist < minDistance) {
+        inGroup.push(position);
+      } else {
+        if (inGroup.length) {
+          optimized.push(mergePoints(inGroup));
+          inGroup = [];
+        }
+        optimized.push(position);
+      }
+    });
+    if (inGroup.length) {
+      optimized.push(mergePoints(inGroup));
+    }
+  });
+  return {
+    ...item,
+    positions: optimized,
+  };
 }
 
 export function findDateRange(
@@ -93,7 +112,6 @@ export function findDateRange(
   groupBy: TTimeGroup = "day"
 ): TDayStats[] {
   let days: TDayStats[] = [];
-  let lastDayPosition: TTrack | undefined;
   positions.forEach((position) => {
     const [dayString] = position.date.split("T");
     const day = new Date(position.date);
@@ -111,10 +129,9 @@ export function findDateRange(
         dayString,
         weekString,
         distance: 0,
-        positions: lastDayPosition ? [lastDayPosition, position] : [position],
+        positions: [position],
       });
     }
-    lastDayPosition = position;
   });
   days.forEach((day) => {
     day.distance = getDistance(day.positions);
@@ -122,15 +139,15 @@ export function findDateRange(
   return days;
 }
 
-function formatMeter(meter: number): string {
+export function formatMeter(meter: number): string {
   return `${(meter / 1000).toFixed(2)}km`;
 }
 
-interface TDayStatSummary {
+type TDayStatSummary = {
   min: number;
   avg: number;
   max: number;
-}
+};
 
 function findStats(days: TDayStats[]): TDayStatSummary {
   const copy: TDayStats[] = [...days];
@@ -155,54 +172,27 @@ function getDistance(tracks: TTrack[]): number {
   return length(line, { units: "meters" });
 }
 
-function getGeoFeatureMain(item: TAnimalTracking, index: number): Feature {
-  const { positions, ...properties } = item;
-  const mainFeature: Feature = {
-    type: "Feature",
-    geometry: {
-      type: "LineString",
-      coordinates: positions.map((p) => p.point),
-    },
-    properties: {
-      ...properties,
-      index,
-    },
-  };
-  return mainFeature;
-}
-
-function getGeoFeature(item: TAnimalTracking): FeatureCollection {
-  const { positions, ...properties } = item;
-  const days = findDateRange(positions);
-  const dayFeatures: Feature[] = days.map(({ positions, day, distance }) => {
-    const [position] = positions;
-    return {
-      type: "Feature",
-      geometry: {
-        type: "Point",
-        coordinates: position.point,
-      },
-      properties: {
-        day,
-        distance: formatMeter(distance),
-      },
-    };
-  });
-  const collection: FeatureCollection = {
-    type: "FeatureCollection",
-    features: [getGeoFeatureMain(item, 0), ...dayFeatures],
-  };
-  return collection;
-}
-
 export async function listyears(): Promise<string[]> {
   const files = await fs.readdir(DATA_DIR);
   const allFiles = files
     .filter((name) => name.includes(".json"))
     .map((name) => name.replace(".json", "").split("-")[0]);
-
   const uniq = [...new Set(allFiles)];
   return uniq;
+}
+
+export function getMetaTrack(positions: TTrack[]) {
+  const dist = getDistance(positions);
+  const days = findDateRange(positions);
+  const dayStats = findStats(days);
+  return {
+    positions: positions.length,
+    distance: formatMeter(dist),
+    min: formatMeter(dayStats.min),
+    avg: formatMeter(dayStats.avg),
+    max: formatMeter(dayStats.max),
+    days: days.length,
+  };
 }
 
 export async function collectForYear(year: string): Promise<TAnimalTracking[]> {
@@ -221,33 +211,33 @@ export async function collectForYear(year: string): Promise<TAnimalTracking[]> {
   rawFiles.forEach((data) => {
     data.vm.forEach(({ id, name, ageString, positions: orgPositions }) => {
       const positions: TTrack[] = orgPositions.map(
-        ({ latitude, longitude, dateTime, id }) => ({
-          point: [longitude, latitude],
-          date: dateTime,
-          id: `${id}`,
-        })
+        ({ latitude, longitude, dateTime, id }, i) => {
+          const prevPoint = i > 0 ? orgPositions[i - 1] : undefined;
+          return {
+            point: [longitude, latitude],
+            date: dateTime,
+            dist: prevPoint
+              ? length(
+                  lineString([
+                    [prevPoint.longitude, prevPoint.latitude],
+                    [longitude, latitude],
+                  ]),
+                  { units: "meters" }
+                )
+              : 0,
+          };
+        }
       );
       const found = clean.find((item) => item.id === id);
       if (found) {
         found.positions = found.positions.concat(positions);
       } else {
         ageString = ageString.trim();
-        const dist = getDistance(positions);
-        const days = findDateRange(positions);
-        const dayStats = findStats(days);
         clean.push({
           id,
           name,
           ageString,
           positions,
-          meta: {
-            positions: positions.length,
-            distance: formatMeter(dist),
-            min: formatMeter(dayStats.min),
-            avg: formatMeter(dayStats.avg),
-            max: formatMeter(dayStats.max),
-            days: days.length,
-          },
         });
       }
     });
@@ -256,7 +246,10 @@ export async function collectForYear(year: string): Promise<TAnimalTracking[]> {
 }
 
 export async function writeFiles(year: string, tracks: TAnimalTracking[]) {
-  await writeData(`${year}-full`, tracks);
+  await writeData(
+    `${year}-full`,
+    tracks.map((item) => optimizePositions(item, 100))
+  );
   await writeData(`${year}-day`, groupDays(tracks, "day"));
   await writeData(`${year}-week`, groupDays(tracks, "week"));
 }
@@ -270,7 +263,8 @@ export async function parseVillreinStats(
   quiet: boolean = false
 ): Promise<void> {
   const tracks: TAnimalTracking[] = await collectForYear(year);
-  let stats: any[] = tracks.map(({ name, ageString, meta }) => {
+  let stats: any[] = tracks.map(({ name, ageString, positions }) => {
+    const meta = getMetaTrack(positions);
     return {
       name,
       ageString,
