@@ -1,51 +1,14 @@
 import fs from "node:fs/promises";
 import { length, lineString, center, points } from "@turf/turf";
 import { getWeek } from "date-fns";
-
-const DATA_DIR = "./data";
-const OUT_DIR = "./out";
-
-// Point = X, Y
-// lng = X
-// lat = y
-
-type TTrackInput = {
-  id: string | number;
-  latitude: number;
-  longitude: number;
-  dateTime: string;
-};
-
-export type TAnimalTracking = {
-  id: string;
-  name: string;
-  ageString: string;
-  positions: TTrack[];
-};
-
-export type TAnimalTrackingInput = Omit<TAnimalTracking, "positions"> & {
-  positions: TTrackInput[];
-};
-
-export type TTrack = {
-  point: [number, number];
-  date: string;
-  dist: number;
-};
-
-type TAnimalTrackingFile = {
-  vm: TAnimalTrackingInput[];
-};
-
-type TDayStats = {
-  day: Date;
-  dayString: string;
-  weekString: string;
-  distance: number;
-  positions: TTrack[];
-};
-
-type TTimeGroup = "day" | "week";
+import type {
+  TTrack,
+  TAnimalTracking,
+  TTimeGroup,
+  TDayStats,
+  TAnimalTrackingFile,
+} from "./types/api";
+import { DATA_DIR, OUT_DIR } from "./helpers/config";
 
 function mergePoints(list: TTrack[]): TTrack {
   const centerPoint = center(points(list.map((pos) => pos.point)));
@@ -254,8 +217,15 @@ export async function writeFiles(year: string, tracks: TAnimalTracking[]) {
   await writeData(`${year}-week`, groupDays(tracks, "week"));
 }
 
-export async function writeData(fileName: string, data: any) {
-  await fs.writeFile(`${OUT_DIR}/${fileName}.json`, JSON.stringify(data));
+export async function writeData(
+  fileName: string,
+  data: any,
+  where?: "out" | "data"
+) {
+  await fs.writeFile(
+    `${where !== "data" ? OUT_DIR : DATA_DIR}/${fileName}.json`,
+    JSON.stringify(data)
+  );
 }
 
 export async function parseVillreinStats(

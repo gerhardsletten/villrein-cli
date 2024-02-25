@@ -1,11 +1,11 @@
 import { describe, expect, test } from "@jest/globals";
 import {
-  type TAnimalTracking,
   collectForYear,
   groupDays,
   listyears,
   optimizePositions,
 } from "./parse-villrein-stats.ts";
+import type { TAnimalTracking } from "./types/api.ts";
 
 const uniqList = (list: string[]) => [...new Set(list)];
 

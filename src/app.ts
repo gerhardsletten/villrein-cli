@@ -1,10 +1,10 @@
 import Fastify from "fastify";
 import {
-  type TAnimalTracking,
   collectForYear,
   groupDays,
   listyears,
 } from "./parse-villrein-stats.ts";
+import type { TAnimalTracking } from "./types/api.ts";
 
 export function buildFastify() {
   const app = Fastify();
